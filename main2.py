@@ -73,7 +73,8 @@ async def process_image(message: Message):
         return
 
     try:
-        API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer/{style_key}"
+        # ✅ Исправленный URL для Hugging Face Inference API
+        API_URL = f"https://router.huggingface.co/hf-inference/models/akhooli/fast-style-transfer/{style_key}"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
 
