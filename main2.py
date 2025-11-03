@@ -15,9 +15,9 @@ logging.basicConfig(level=logging.INFO)
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
-PAYMENT_LINK = os.getenv("PAYMENT_LINK", "https://example.com")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # e.g. https://your-bot.onrender.com
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+QR_FILE_ID = os.getenv("QR_FILE_ID")  # file_id QR-кода
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
@@ -35,8 +35,9 @@ STYLES = {
 }
 
 # Хранилища
-user_style = {}                # кто выбрал стиль
+user_style = {}                # {user_id: style_key}
 paid_users = {}                # {user_id: timestamp_окончания}
+user_usage_count = {}          # {user_id: count}
 pending_payments = {}          # {user_id: file_id_скрина}
 
 # Вспомогательные функции
@@ -50,6 +51,12 @@ def is_paid(user_id: int) -> bool:
 
 def grant_access(user_id: int, hours: int = 24):
     paid_users[user_id] = time.time() + hours * 3600
+
+def can_use_free(user_id: int) -> bool:
+    return user_usage_count.get(user_id, 0) < 2
+
+def increment_usage(user_id: int):
+    user_usage_count[user_id] = user_usage_count.get(user_id, 0) + 1
 
 async def process_image(message: Message):
     user_id = message.from_user.id
@@ -93,15 +100,28 @@ async def start(message: Message):
         f"Стили: {styles_list}\n\n"
         "1. Напиши название стиля\n"
         "2. Отправь фото\n\n"
-        "Первая обработка — бесплатно! ❤️"
+        "У тебя **2 бесплатных использования** — потом /pay"
     )
 
 @dp.message(Command("pay"))
 async def cmd_pay(message: Message):
-    await message.answer(
-        "Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
-        f"🔗 Оплатить: {PAYMENT_LINK}\n\n"
-        "После оплаты пришли **скриншот подтверждения перевода** (должно быть видно сумму и получателя)."
+    if not QR_FILE_ID:
+        await message.answer("❌ QR-код не загружен. Напиши админу.")
+        return
+
+    await message.answer_photo(
+        photo=QR_FILE_ID,
+        caption=(
+            "🎨 Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n\n"
+            "✅ Как оплатить:\n"
+            "1. Сохрани этот QR-код.\n"
+            "2. Открой его в своём банковском приложении (Сбер, ВТБ, Альфа и т.д.).\n"
+            "3. Введи сумму: **99 ₽**\n"
+            "4. Комментарий (по желанию): *«Бот-артист»*\n"
+            "5. Подтверди перевод.\n\n"
+            "❗ QR-код работает всегда — не нужно обновлять!\n"
+            "После оплаты пришли скриншот подтверждения — и получишь доступ!"
+        )
     )
 
 # Обработка текста (выбор стиля)
@@ -124,26 +144,29 @@ async def handle_photo(message: Message):
         await process_image(message)
         return
 
-    # Бесплатная попытка — только если стиль выбран
-    if user_id in user_style:
+    if can_use_free(user_id):
+        increment_usage(user_id)
         await process_image(message)
-        # После первой генерации — предложить оплату
-        await message.answer(
-            "✨ Первая картинка — в подарок!\n"
-            "Хочешь больше? Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
-            f"🔗 /pay"
-        )
-        # Удаляем стиль, чтобы не спамил
-        user_style.pop(user_id, None)
-    else:
-        await message.answer("Сначала напиши стиль: " + ", ".join(STYLES.keys()))
+        remaining = 2 - user_usage_count[user_id]
+        if remaining > 0:
+            await message.answer(f"🎨 Осталось бесплатных использований: {remaining}")
+        else:
+            await message.answer(
+                "🎨 Твои **2 бесплатных использования** закончились!\n"
+                "Хочешь больше? Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
+                f"🔗 /pay"
+            )
+        return
+
+    # Если лимит превышен
+    await message.answer(
+        "🎨 Лимит бесплатных использований исчерпан.\n"
+        "Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
+        f"🔗 /pay"
+    )
 
 # Приём скриншотов оплаты
-@dp.message(lambda msg: msg.photo and not is_paid(msg.from_user.id) and msg.caption and "скрин" in msg.caption.lower())
-async def fallback_payment_handler(message: Message):
-    await handle_payment_proof(message)
-
-@dp.message(lambda msg: msg.photo and not is_paid(msg.from_user.id))
+@dp.message(lambda msg: msg.photo and user_usage_count.get(msg.from_user.id, 0) >= 2 and not is_paid(msg.from_user.id))
 async def handle_payment_proof(message: Message):
     user_id = message.from_user.id
     pending_payments[user_id] = message.photo[-1].file_id
@@ -154,7 +177,7 @@ async def handle_payment_proof(message: Message):
             await bot.send_photo(
                 ADMIN_ID,
                 photo=message.photo[-1].file_id,
-                caption=f"Новый платёж!\nID: {user_id}\nUsername: @{message.from_user.username or 'нет'}\n\n"
+                caption=f"📥 Новый платёж!\nID: {user_id}\nUsername: @{message.from_user.username or 'нет'}\n\n"
                         f"Чтобы подтвердить, отправь: /approve_{user_id}"
             )
         except Exception as e:
@@ -173,6 +196,9 @@ async def admin_approve(message: Message):
         except:
             pass
         await message.answer(f"✅ Доступ выдан пользователю {user_id}")
+        return
+
+    await message.answer("Неизвестная команда. Используй: /approve_123456789")
 
 # Webhook setup
 async def on_startup(app):
