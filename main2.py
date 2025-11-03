@@ -2,12 +2,12 @@ import os
 import time
 import re
 import logging
-from flask import Flask, request
+import requests
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.types import Message
 from aiogram.filters import Command
-import asyncio
+from aiohttp import web
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -73,7 +73,6 @@ async def process_image(message: Message):
         return
 
     try:
-        import requests
         API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer/{style_key}"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
@@ -201,25 +200,39 @@ async def admin_approve(message: Message):
 
     await bot.send_message(ADMIN_ID, "Неизвестная команда. Используй: /approve_123456789")
 
-# Flask app
-app = Flask(__name__)
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
+# aiohttp routes
+async def handle_webhook(request: web.Request):
     try:
-        json_string = request.get_data().decode('utf-8')
+        json_string = await request.text()
         update = Update.model_validate_json(json_string)
-        # Запускаем асинхронную функцию внутри синхронного Flask
-        asyncio.run(dp.feed_update(bot, update))
-        return {"ok": True}
+        await dp.feed_update(bot, update)
+        return web.json_response({"ok": True})
     except Exception as e:
         logging.error(f"Ошибка вебхука: {e}")
-        return {"ok": False}, 500
+        return web.json_response({"ok": False}, status=500)
 
-@app.route('/', methods=['GET'])
-def index():
-    return "Bot is running", 200
+async def handle_index(request: web.Request):
+    return web.Response(text="Bot is running", status=200)
 
+# Webhook setup
+async def on_startup(app):
+    webhook_url = f"https://picasso-bot-nilp.onrender.com/webhook"  # ⬅️ твой URL
+    await bot.set_webhook(webhook_url, drop_pending_updates=True)
+    logging.info(f"Webhook установлен: {webhook_url}")
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+    await bot.session.close()
+
+# Запуск
 if __name__ == "__main__":
+    app = web.Application()
+    app.add_routes([
+        web.post('/webhook', handle_webhook),
+        web.get('/', handle_index),
+    ])
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
     port = int(os.getenv("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    web.run_app(app, host="0.0.0.0", port=port)
