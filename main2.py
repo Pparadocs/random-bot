@@ -2,12 +2,11 @@ import os
 import time
 import re
 import logging
-import requests
+from flask import Flask, request
 from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 from aiogram.types import Message
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -15,12 +14,8 @@ logging.basicConfig(level=logging.INFO)
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # e.g. https://your-bot.onrender.com
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-QR_FILE_ID = os.getenv("QR_FILE_ID")  # file_id QR-кода
-
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
+QR_FILE_ID = os.getenv("QR_FILE_ID")
 
 # Инициализация
 bot = Bot(token=BOT_TOKEN)
@@ -49,23 +44,23 @@ def is_paid(user_id: int) -> bool:
             del paid_users[user_id]
     return False
 
-def grant_access(user_id: int, hours: int = 24):
-    paid_users[user_id] = time.time() + hours * 3600
-
 def can_use_free(user_id: int) -> bool:
     return user_usage_count.get(user_id, 0) < 2
 
 def increment_usage(user_id: int):
     user_usage_count[user_id] = user_usage_count.get(user_id, 0) + 1
 
+def grant_access(user_id: int, hours: int = 24):
+    paid_users[user_id] = time.time() + hours * 3600
+
 async def process_image(message: Message):
     user_id = message.from_user.id
     style_key = user_style.get(user_id)
     if not style_key:
-        await message.answer("Сначала выбери стиль: " + ", ".join(STYLES.keys()))
+        await bot.send_message(user_id, "Сначала выбери стиль: " + ", ".join(STYLES.keys()))
         return
 
-    await message.answer("⏳ Обрабатываю... (5–10 сек)")
+    await bot.send_message(user_id, "⏳ Обрабатываю... (5–10 сек)")
 
     photo = message.photo[-1]
     try:
@@ -73,29 +68,31 @@ async def process_image(message: Message):
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
     except Exception as e:
         logging.error(f"Ошибка получения файла: {e}")
-        await message.answer("Не удалось загрузить фото. Попробуй снова.")
+        await bot.send_message(user_id, "Не удалось загрузить фото. Попробуй снова.")
         return
 
     try:
+        import requests
         API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer/{style_key}"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
 
         if response.status_code == 200:
-            await message.answer_photo(photo=response.content, caption="✨ Вот твой арт!")
+            await bot.send_photo(user_id, photo=response.content, caption="✨ Вот твой арт!")
         else:
             error = response.json().get("error", "Неизвестная ошибка API")
-            await message.answer(f"❌ Ошибка обработки: {error}")
+            await bot.send_message(user_id, f"❌ Ошибка обработки: {error}")
             logging.error(f"HF API error: {response.text}")
     except Exception as e:
-        await message.answer("Ошибка при генерации. Попробуй позже.")
+        await bot.send_message(user_id, "Ошибка при генерации. Попробуй позже.")
         logging.error(f"Exception in process_image: {e}")
 
 # Команды
 @dp.message(Command("start"))
 async def start(message: Message):
     styles_list = ", ".join(STYLES.keys())
-    await message.answer(
+    await bot.send_message(
+        message.from_user.id,
         "🎨 Привет! Я — бот-художник.\n"
         f"Стили: {styles_list}\n\n"
         "1. Напиши название стиля\n"
@@ -106,10 +103,11 @@ async def start(message: Message):
 @dp.message(Command("pay"))
 async def cmd_pay(message: Message):
     if not QR_FILE_ID:
-        await message.answer("❌ QR-код не загружен. Напиши админу.")
+        await bot.send_message(message.from_user.id, "❌ QR-код не загружен. Напиши админу.")
         return
 
-    await message.answer_photo(
+    await bot.send_photo(
+        message.from_user.id,
         photo=QR_FILE_ID,
         caption=(
             "🎨 Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n\n"
@@ -131,9 +129,9 @@ async def handle_text(message: Message):
     for name, key in STYLES.items():
         if text == name.lower():
             user_style[message.from_user.id] = key
-            await message.answer(f"Отлично! Теперь пришли фото для стиля «{name}».")
+            await bot.send_message(message.from_user.id, f"Отлично! Теперь пришли фото для стиля «{name}».")
             return
-    await message.answer("Неизвестный стиль. Доступные: " + ", ".join(STYLES.keys()))
+    await bot.send_message(message.from_user.id, "Неизвестный стиль. Доступные: " + ", ".join(STYLES.keys()))
 
 # Обработка фото
 @dp.message(lambda msg: msg.photo)
@@ -149,9 +147,10 @@ async def handle_photo(message: Message):
         await process_image(message)
         remaining = 2 - user_usage_count[user_id]
         if remaining > 0:
-            await message.answer(f"🎨 Осталось бесплатных использований: {remaining}")
+            await bot.send_message(user_id, f"🎨 Осталось бесплатных использований: {remaining}")
         else:
-            await message.answer(
+            await bot.send_message(
+                user_id,
                 "🎨 Твои **2 бесплатных использования** закончились!\n"
                 "Хочешь больше? Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
                 f"🔗 /pay"
@@ -159,7 +158,8 @@ async def handle_photo(message: Message):
         return
 
     # Если лимит превышен
-    await message.answer(
+    await bot.send_message(
+        user_id,
         "🎨 Лимит бесплатных использований исчерпан.\n"
         "Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
         f"🔗 /pay"
@@ -170,7 +170,7 @@ async def handle_photo(message: Message):
 async def handle_payment_proof(message: Message):
     user_id = message.from_user.id
     pending_payments[user_id] = message.photo[-1].file_id
-    await message.answer("✅ Скриншот получен! Ожидай подтверждения (обычно в течение часа).")
+    await bot.send_message(user_id, "✅ Скриншот получен! Ожидай подтверждения (обычно в течение часа).")
 
     if ADMIN_ID:
         try:
@@ -195,30 +195,40 @@ async def admin_approve(message: Message):
             await bot.send_message(user_id, "✅ Оплата подтверждена! У тебя 24 часа неограниченного доступа. Твори!")
         except:
             pass
-        await message.answer(f"✅ Доступ выдан пользователю {user_id}")
+        await bot.send_message(ADMIN_ID, f"✅ Доступ выдан пользователю {user_id}")
         return
 
-    await message.answer("Неизвестная команда. Используй: /approve_123456789")
+    await bot.send_message(ADMIN_ID, "Неизвестная команда. Используй: /approve_123456789")
 
-# Webhook setup
-async def on_startup(app):
-    if WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
-        logging.info(f"Webhook установлен: {WEBHOOK_URL}")
-    else:
-        logging.warning("WEBHOOK_HOST не задан — бот работает в polling (не для Render!)")
+# Flask app
+app = Flask(__name__)
 
-async def on_shutdown(app):
-    await bot.delete_webhook()
-    await bot.session.close()
+@app.route('/webhook', methods=['POST'])
+async def webhook():
+    try:
+        json_string = request.get_data().decode('utf-8')
+        update = Update.model_validate_json(json_string)
+        await dp.feed_update(bot, update)
+        return {"ok": True}
+    except Exception as e:
+        logging.error(f"Ошибка вебхука: {e}")
+        return {"ok": False}, 500
 
-# Запуск
+@app.route('/', methods=['GET'])
+def index():
+    return "Bot is running", 200
+
 if __name__ == "__main__":
-    app = web.Application()
-    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    webhook_handler.register(app, path=WEBHOOK_PATH)
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
+    import asyncio
 
+    async def setup_webhook():
+        webhook_url = f"https://your-bot.onrender.com/webhook"  # Заменить на свой URL
+        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        logging.info(f"Webhook установлен: {webhook_url}")
+
+    # Устанавливаем вебхук
+    asyncio.run(setup_webhook())
+
+    # Запускаем Flask
     port = int(os.getenv("PORT", 8000))
-    web.run_app(app, host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)
