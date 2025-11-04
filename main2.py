@@ -1,6 +1,6 @@
 import os
 import logging
-import requests
+import replicate
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.types import Message
@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-HF_TOKEN = os.getenv("HF_TOKEN")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 # Инициализация
 bot = Bot(token=BOT_TOKEN)
@@ -20,14 +20,14 @@ dp = Dispatcher()
 
 # Стили
 STYLES = {
-    "конфетти": "candy style",
-    "мозаика": "mosaic style",
-    "принцесса дождя": "rain princess style",
-    "удни": "udnie style",
-    "аниме": "anime style",
-    "ван гог": "painting in style of van gogh",
-    "киберпанк": "cyberpunk style",
-    "пиксель-арт": "pixel art style"
+    "конфетти": "candy",
+    "мозаика": "mosaic",
+    "принцесса дождя": "rain_princess",
+    "удни": "udnie",
+    "аниме": "anime",
+    "ван гог": "van gogh",
+    "киберпанк": "cyberpunk",
+    "пиксель-арт": "pixel art"
 }
 
 # Хранилища
@@ -53,35 +53,21 @@ async def process_image(message: Message):
         return
 
     try:
-        import requests
-        # ✅ Используем модель stabilityai/stable-diffusion-2-1
-        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-        # Передаём стиль как часть prompt
-        payload = {
-            "inputs": f"photo of a person, {style_key}, masterpiece, best quality",
-            "parameters": {
-                "num_inference_steps": 20,
-                "guidance_scale": 7.5
+        # ✅ Используем Replicate
+        model = "lllyasviel/sd-controlnet-canny:435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876"
+        output = replicate.run(
+            model,
+            input={
+                "image": file_url,
+                "prompt": f"{style_key} style, masterpiece, best quality",
+                "num_inference_steps": 20
             }
-        }
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-
-        if response.status_code == 200:
-            # ✅ Отправляем фото напрямую из байтов
-            await bot.send_photo(user_id, photo=response.content, caption="✨ Вот твой арт!")
-        elif response.status_code == 503:
-            # Сервис занят — попробуй позже
-            await bot.send_message(user_id, "🔧 Модель загружается... Попробуй через 1-2 минуты.")
+        )
+        if output:
+            # ✅ Отправляем фото
+            await bot.send_photo(user_id, photo=output[0], caption="✨ Вот твой арт!")
         else:
-            # ✅ Безопасный парсинг ошибки
-            try:
-                error_data = response.json()
-                error = error_data.get("error", "Неизвестная ошибка API")
-            except Exception:
-                error = f"Ошибка API: {response.status_code}, {response.text[:200]}"
-            await bot.send_message(user_id, f"❌ Ошибка обработки: {error}")
-            logging.error(f"HF API error: {response.status_code} - {response.text}")
+            await bot.send_message(user_id, "❌ Не удалось обработать. Попробуй другое фото.")
 
     except Exception as e:
         await bot.send_message(user_id, "Ошибка при генерации. Попробуй позже.")
