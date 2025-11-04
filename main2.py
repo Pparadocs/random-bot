@@ -19,21 +19,6 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Стили (теперь это промты)
-STYLES = {
-    "аниме": "anime style, masterpiece, best quality",
-    "ван гог": "painting in style of van gogh, masterpiece, best quality",
-    "киберпанк": "cyberpunk style, masterpiece, best quality",
-    "пиксель-арт": "pixel art style, masterpiece, best quality",
-    "мозаика": "mosaic style, masterpiece, best quality",
-    "конфетти": "candy style, masterpiece, best quality",
-    "удни": "udnie style, masterpiece, best quality",
-    "принцесса дождя": "rain princess style, masterpiece, best quality"
-}
-
-# Хранилища
-user_style = {}  # {user_id: prompt}
-
 # Вспомогательные функции
 async def generate_image(message: Message):
     user_id = message.from_user.id
@@ -51,8 +36,11 @@ async def generate_image(message: Message):
             "Content-Type": "application/json"
         }
 
+        # ✅ Новый version
+        version = "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc"
+
         payload = {
-            "version": "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea539d07f79a9f2bdf5d022535",  # ✅ version
+            "version": version,
             "input": {
                 "prompt": f"{prompt}, masterpiece, best quality",
                 "num_inference_steps": 20
