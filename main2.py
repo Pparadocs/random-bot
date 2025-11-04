@@ -73,6 +73,7 @@ async def process_image(message: Message):
         return
 
     try:
+        import requests
         # ✅ Исправленный URL для Hugging Face Inference API
         API_URL = f"https://router.huggingface.co/hf-inference/models/akhooli/fast-style-transfer/{style_key}"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -89,8 +90,8 @@ async def process_image(message: Message):
             try:
                 error_data = response.json()
                 error = error_data.get("error", "Неизвестная ошибка API")
-            except requests.exceptions.JSONDecodeError:
-                error = f"Ошибка API: {response.status_code}, {response.text}"
+            except Exception:
+                error = f"Ошибка API: {response.status_code}, {response.text[:200]}"
             await bot.send_message(user_id, f"❌ Ошибка обработки: {error}")
             logging.error(f"HF API error: {response.status_code} - {response.text}")
 
