@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")  # Используем токен Default
 
 # Инициализация
 bot = Bot(token=BOT_TOKEN)
