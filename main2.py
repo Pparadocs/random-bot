@@ -54,14 +54,14 @@ async def process_image(message: Message):
         return
 
     try:
-        # ✅ Используем Replicate API через requests
+        # ✅ Используем рабочую модель на Replicate
         headers = {
             "Authorization": f"Token {REPLICATE_API_TOKEN}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "version": "435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876",  # lllyasviel/sd-controlnet-canny
+            "version": "ac732df83ceee82476b85ae97e7fd2477b928505428898884354238172485242",  # stability-ai/stable-diffusion
             "input": {
                 "image": file_url,
                 "prompt": f"{style_key} style, masterpiece, best quality",
