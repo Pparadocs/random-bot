@@ -1,0 +1,15 @@
+# render.yaml
+services:
+  - type: web
+    name: my-telegram-image-bot # Выберите имя для вашего сервиса на Render
+    env: python
+    runtimeVersion: python-3.11 # Указываем версию Python 3.11
+    buildCommand: pip install -r requirements2.txt
+    startCommand: python main2.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        # Значение будет взято из переменной окружения, установленной в настройках сервиса на Render
+        sync: false # или удалите эту строку, значение по умолчанию - false
+      - key: APP_URL
+        # Значение будет взято из переменной окружения, установленной в настройках сервиса на Render
+        sync: false # или удалите эту строку, значение по умолчанию - false
