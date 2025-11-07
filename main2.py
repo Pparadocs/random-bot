@@ -1,3 +1,8 @@
+# main2.py
+# Бесплатный Telegram-бот для стилизации изображений с Pillow
+# Поддерживает стиль через фильтры Pillow
+# Используется PTB v20+ (ApplicationBuilder)
+
 import os
 import json
 import logging
@@ -38,7 +43,7 @@ STYLES = [
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
-state = {}
+state = {}  # структура: { "chat_id_str": "style" }
 
 def load_state():
     global state
@@ -61,6 +66,7 @@ def save_state():
         logger.error("Не удалось сохранить состояние: %s", e)
 
 def apply_style(img: Image.Image, style: str) -> Image.Image:
+    """Применяет выбранный стиль к изображению (Pillow)."""
     img = img.convert("RGB")
     if style == "grayscale":
         return ImageOps.grayscale(img).convert("RGB")
@@ -98,6 +104,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def show_styles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Инлайн-клавиатура со стилями
     rows = []
     row = []
     for i, s in enumerate(STYLES, 1):
@@ -144,13 +151,17 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     style = state.get(str(chat_id), "grayscale")
 
     file = None
+    file_name_hint = "image.jpg"
+
     if update.message.photo:
         photo = update.message.photo[-1]
         file = await photo.get_file()
+        file_name_hint = f"photo_{photo.file_id}.jpg"
     elif update.message.document:
         mime = update.message.document.mime_type or ""
         if mime.startswith("image/"):
             file = await update.message.document.get_file()
+            file_name_hint = update.message.document.file_name or "image.jpg"
         else:
             await update.message.reply_text("Принимаю только изображения (image/*). Попробуйте другое сообщение.")
             return
@@ -158,7 +169,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, отправьте изображение (фото или документ-изображение).")
         return
 
-    file_name_hint = "image.jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         await file.download_to_drive(tmp.name)
         tmp_path = tmp.name
@@ -195,26 +205,8 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_image))
 
-    # Вебхук настройки
-    webhook_host = os.environ.get("WEBHOOK_HOST")  # https://your-domain.onrender.com
-    webhook_path = os.environ.get("WEBHOOK_PATH", "/webhook")
-    port = int(os.environ.get("PORT", "8443"))
-    webhook_url = os.environ.get("WEBHOOK_URL")
-
-    if webhook_host:
-        # Если заданы параметры вебхука — запускаем вебхук
-        if not webhook_url:
-            webhook_url = webhook_host.rstrip("/") + webhook_path
-        logger.info("Запуск вебхука: %s:%s%s", webhook_host, port, webhook_path)
-        # url_path должен быть без ведущего слеша
-        app.run_webhook(listen="0.0.0.0",
-                        port=port,
-                        url_path=webhook_path.lstrip("/"),
-                        webhook_url=webhook_url)
-    else:
-        # Тестирование локально: fallback на polling
-        logger.info("WEBHOOK_HOST не задан. Запуск в режиме polling для локального тестирования.")
-        app.run_polling()
+    logger.info("Бот запущен")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
