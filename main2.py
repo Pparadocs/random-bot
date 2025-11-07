@@ -1,8 +1,7 @@
 # main2.py
 # Бесплатный Telegram-бот для стилизации изображений с Pillow
-# Поддерживает стиль "графический" через набор фильтров Pillow
-# Функционал: /start, /styles (инлайн-кнопки), /style <название> (ручной выбор),
-# отправка изображения -> бот возвращает изображение с примененным стилем.
+# Поддерживает стиль через фильтры Pillow
+# Используется PTB v20+ (ApplicationBuilder)
 
 import os
 import json
@@ -12,11 +11,7 @@ import io
 
 from PIL import Image, ImageOps, ImageFilter
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -33,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Глобальный список стилей
+# Стили
 STYLES = [
     "grayscale",
     "sepia",
@@ -46,7 +41,8 @@ STYLES = [
     "posterize",
 ]
 
-STATE_FILE = "state.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(BASE_DIR, "state.json")
 state = {}  # структура: { "chat_id_str": "style" }
 
 def load_state():
@@ -58,9 +54,12 @@ def load_state():
         except Exception as e:
             logger.error("Не удалось загрузить состояние: %s", e)
             state = {}
+    else:
+        state = {}
 
 def save_state():
     try:
+        os.makedirs(BASE_DIR, exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -89,7 +88,6 @@ def apply_style(img: Image.Image, style: str) -> Image.Image:
         return img.filter(ImageFilter.EMBOSS)
     if style == "posterize":
         return ImageOps.posterize(img, 4)
-    # Если стиль не найден — вернуть оригинал без изменений
     return img
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,17 +95,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     load_state()
     current = state.get(str(chat_id), None)
-    msg = (
+    await update.message.reply_text(
         f"Привет, {user.first_name}! Я могу стилизовать ваше изображение.\n"
         f"Доступные стили: {', '.join(STYLES)}\n"
         f"Текущий стиль: {current if current else 'не установлен'}\n\n"
         "Используйте /styles чтобы выбрать стиль, или отправьте /style <название> например: /style sepia\n"
         "Затем отправьте изображение."
     )
-    await update.message.reply_text(msg)
 
 async def show_styles(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Создаём кнопки стилями (инлайн-клавиатура)
+    # Инлайн-клавиатура со стилями
     rows = []
     row = []
     for i, s in enumerate(STYLES, 1):
@@ -115,7 +112,7 @@ async def show_styles(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if i % 3 == 0:
             rows.append(row)
             row = []
-    if row:  # остаток кнопок
+    if row:
         rows.append(row)
     keyboard = InlineKeyboardMarkup(rows)
     await update.message.reply_text("Выберите стиль обработки:", reply_markup=keyboard)
@@ -125,9 +122,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     style = query.data
     chat_id = query.message.chat.id
+    load_state()
     state[str(chat_id)] = style
     save_state()
-    await query.edit_message_text(text=f"Стиль установлен: {style}. Пришли изображение, и я применю стиль.")
+    await query.edit_message_text(text=f"Стиль установлен: {style}. Пришлите изображение.")
 
 async def set_style_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
@@ -142,27 +140,24 @@ async def set_style_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     chat_id = update.effective_chat.id
+    load_state()
     state[str(chat_id)] = style
     save_state()
     await update.message.reply_text(f"Стиль установлен: {style}. Пришлите изображение.")
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Определяем стиль для этого чата
     load_state()
     chat_id = update.effective_chat.id
     style = state.get(str(chat_id), "grayscale")
 
-    # Получаем файл изображения (можно как фото, так и документ с изображением)
     file = None
     file_name_hint = "image.jpg"
 
     if update.message.photo:
-        # Фото с наибольшим разрешением
         photo = update.message.photo[-1]
         file = await photo.get_file()
         file_name_hint = f"photo_{photo.file_id}.jpg"
     elif update.message.document:
-        # Документ — проверить mime-type
         mime = update.message.document.mime_type or ""
         if mime.startswith("image/"):
             file = await update.message.document.get_file()
@@ -174,7 +169,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, отправьте изображение (фото или документ-изображение).")
         return
 
-    # Скачиваем файл во временный файл
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         await file.download_to_drive(tmp.name)
         tmp_path = tmp.name
@@ -195,7 +189,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             os.remove(tmp_path)
         except Exception:
-            pass  # игнорируем ошибки удаления
+            pass
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -216,4 +210,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
