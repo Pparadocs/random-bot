@@ -1,0 +1,4 @@
+Flask==2.3.3
+python-telegram-bot==20.8
+wikipedia==1.4.0
+gunicorn==21.2.0
