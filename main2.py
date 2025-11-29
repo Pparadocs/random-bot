@@ -60,15 +60,26 @@ async def search_wikipedia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_wikipedia))
 
-# Flask routes
+# Flask route для webhook
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def telegram_webhook():
-    json_data = request.get_json()
+    # Явно указываем, что ожидаем JSON
+    if request.content_type != 'application/json':
+        logging.warning(f"❌ Неожиданный Content-Type: {request.content_type}")
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+
+    json_data = request.get_json(silent=True)
     if not json_data:
-        return jsonify({"error": "no data"}), 400
-    update = Update.de_json(json_data, bot)
-    application.update_queue.put_nowait(update)
-    return jsonify({"status": "ok"})
+        logging.warning("❌ Не удалось распарсить JSON из тела запроса")
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    try:
+        update = Update.de_json(json_data, bot)
+        application.update_queue.put_nowait(update)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        logging.error(f"❌ Ошибка при обработке обновления: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
 
 @app.route("/health")
 def health():
@@ -83,9 +94,6 @@ def set_webhook():
     if WEBHOOK_URL:
         logging.info(f"ℹ️ Webhook должен быть установлен на: {WEBHOOK_URL}")
         logging.info("ℹ️ Установите webhook вручную через API Telegram.")
-        # python-telegram-bot асинхронный, и вызов bot.get_webhook_info() или set_webhook()
-        # здесь (в синхронной функции при старте) вызовет ошибку.
-        # Лучше установить вручную: см. инструкцию.
     else:
         logging.warning("⚠️ RENDER_URL не задан — webhook не установлен")
 
