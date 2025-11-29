@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 from flask import Flask, request, jsonify
-from telegram import Update, Bot  # ← добавлен Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 import wikipedia
 
@@ -81,10 +81,17 @@ def home():
 # Установка webhook при старте
 def set_webhook():
     if WEBHOOK_URL:
-        bot.set_webhook(url=WEBHOOK_URL)
-        logging.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+        try:
+            info = bot.get_webhook_info()
+            if info.url != WEBHOOK_URL:
+                bot.set_webhook(url=WEBHOOK_URL)
+                logging.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+            else:
+                logging.info(f"ℹ️ Webhook уже установлен на: {WEBHOOK_URL}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка установки webhook: {e}")
     else:
-        logging.warning("⚠️ Webhook не установлен (RENDER_URL отсутствует)")
+        logging.warning("⚠️ RENDER_URL не задан — webhook не установлен")
 
 # Запуск
 if __name__ == "__main__":
